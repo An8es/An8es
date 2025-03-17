@@ -1,7 +1,7 @@
 import requests
 import logging
 import json
-from telegram import Update, ReplyKeyboardMarkup
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 from config import TELEGRAM_BOT_TOKEN, AI_API_KEY
 
@@ -56,7 +56,27 @@ LAWS_DATA = {
         {"title": "ФЗ-400. О страховых пенсиях", "link": "http://fz-rf.ru/400"},
         {"title": "ФЗ-326. Об обязательном медицинском страховании", "link": "http://fz-rf.ru/326"},
         {"title": "ФЗ-127. О несостоятельности (банкротстве)", "link": "http://fz-rf.ru/127"}
+    ],
+    "Уголовный кодекс": [
+        {"title": "Статья 105. Убийство", "link": "http://uk-rf.ru/105"},
+        {"title": "Статья 111. Умышленное причинение тяжкого вреда здоровью", "link": "http://uk-rf.ru/111"},
+        {"title": "Статья 158. Кража", "link": "http://uk-rf.ru/158"},
+        {"title": "Статья 159. Мошенничество", "link": "http://uk-rf.ru/159"},
+        {"title": "Статья 161. Грабеж", "link": "http://uk-rf.ru/161"},
+        {"title": "Статья 162. Разбой", "link": "http://uk-rf.ru/162"},
+        {"title": "Статья 163. Вымогательство", "link": "http://uk-rf.ru/163"},
+        {"title": "Статья 228. Незаконные приобретение, хранение, перевозка наркотических средств", "link": "http://uk-rf.ru/228"},
+        {"title": "Статья 264. Нарушение правил дорожного движения", "link": "http://uk-rf.ru/264"},
+        {"title": "Статья 291. Дача взятки", "link": "http://uk-rf.ru/291"}
     ]
+}
+
+# Примеры запросов для каждой категории
+CATEGORY_EXAMPLES = {
+    "Трудовой кодекс": "Например: 'Какая статья регулирует продолжительность рабочего дня?'",
+    "Административные правонарушения": "Например: 'Какая статья предусматривает наказание за управление автомобилем в состоянии опьянения?'",
+    "Федеральные законы": "Например: 'Какая статья регулирует защиту персональных данных?'",
+    "Уголовный кодекс": "Например: 'Какая статья предусматривает наказание за кражу?'"
 }
 
 # Функция для запроса к нейронке
@@ -113,7 +133,7 @@ async def get_article_summary(link: str) -> str:
 # Обработчик команды /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Пользователь {update.message.from_user.username} запустил бота.")
-    keyboard = [["Трудовой кодекс", "Административные правонарушения"], ["Федеральные законы"]]
+    keyboard = [["Трудовой кодекс", "Административные правонарушения"], ["Федеральные законы", "Уголовный кодекс"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     await update.message.reply_text(
         "Привет! Я ваш помощник с ИИ. Выберите категорию законов:",
@@ -129,7 +149,7 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del context.user_data["category"]
     
     # Показываем кнопки с категориями
-    keyboard = [["Трудовой кодекс", "Административные правонарушения"], ["Федеральные законы"]]
+    keyboard = [["Трудовой кодекс", "Административные правонарушения"], ["Федеральные законы", "Уголовный кодекс"]]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     
     await update.message.reply_text(
@@ -137,29 +157,53 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
-# Обработчик запросов в свободной форме
-async def handle_free_form_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Обработчик выбора категории
+async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
-    logger.info(f"Получен запрос от пользователя {update.message.from_user.username}: {user_message}")
+    logger.info(f"Пользователь {update.message.from_user.username} выбрал категорию: {user_message}")
+
+    if user_message in LAWS_DATA:
+        context.user_data["category"] = user_message
+        
+        # Создаем кнопки для статей
+        articles = [law["title"] for law in LAWS_DATA[user_message]]
+        articles.append("Другое")
+        keyboard = [articles[i:i + 2] for i in range(0, len(articles), 2)]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        
+        await update.message.reply_text(
+            f"Вы выбрали категорию: {user_message}. Выберите статью или нажмите 'Другое' для поиска:",
+            reply_markup=reply_markup
+        )
+    else:
+        await update.message.reply_text("Пожалуйста, выберите категорию из списка.")
+
+# Обработчик выбора статьи
+async def handle_article_selection(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    logger.info(f"Пользователь {update.message.from_user.username} выбрал статью: {user_message}")
 
     if "category" in context.user_data:
         category = context.user_data["category"]
         
-        # Формируем запрос для нейронки
-        prompt = f"Какая статья в {category} отвечает за '{user_message}'? Ответь только названием статьи."
-        article_title = await ask_ai(prompt)
-        
-        # Ищем статью в базе данных
-        results = search_laws(article_title, category)
-        
-        if results:
-            law = results[0]  # Берем первую найденную статью
-            summary = await get_article_summary(law["link"])
-            response = f"📖 {law['title']}\n🔗 {law['link']}\nℹ️ {summary}"
+        if user_message == "Другое":
+            example = CATEGORY_EXAMPLES.get(category, "Введите ваш запрос.")
+            await update.message.reply_text(
+                f"Введите ваш запрос. {example}",
+                reply_markup=ReplyKeyboardRemove()
+            )
         else:
-            response = f"По вашему запросу в категории '{category}' ничего не найдено."
-        
-        await update.message.reply_text(response)
+            # Ищем выбранную статью
+            results = search_laws(user_message, category)
+            
+            if results:
+                law = results[0]  # Берем первую найденную статью
+                summary = await get_article_summary(law["link"])
+                response = f"📖 {law['title']}\n🔗 {law['link']}\nℹ️ {summary}"
+            else:
+                response = f"Статья '{user_message}' не найдена в категории '{category}'."
+            
+            await update.message.reply_text(response)
     else:
         await update.message.reply_text("Пожалуйста, сначала выберите категорию законов.")
 
@@ -168,14 +212,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     logger.info(f"Получено сообщение от пользователя {update.message.from_user.username}: {user_message}")
 
-    if user_message in ["Трудовой кодекс", "Административные правонарушения", "Федеральные законы"]:
-        await update.message.reply_text(f"Вы выбрали категорию: {user_message}. Введите запрос, например: 'какая статья отвечает за время рабочего дня'.")
-        context.user_data["category"] = user_message
+    if user_message in LAWS_DATA:
+        await handle_category_selection(update, context)
+    elif "category" in context.user_data:
+        await handle_article_selection(update, context)
     else:
-        if "category" in context.user_data:
-            await handle_free_form_query(update, context)
-        else:
-            await update.message.reply_text("Пожалуйста, сначала выберите категорию законов.")
+        await update.message.reply_text("Пожалуйста, сначала выберите категорию законов.")
 
 # Основная функция для запуска бота
 def main():
