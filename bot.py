@@ -120,28 +120,60 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=reply_markup
     )
 
+# Обработчик команды /restart
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Пользователь {update.message.from_user.username} перезапустил бота.")
+    
+    # Сбрасываем состояние пользователя
+    if "category" in context.user_data:
+        del context.user_data["category"]
+    
+    # Показываем кнопки с категориями
+    keyboard = [["Трудовой кодекс", "Административные правонарушения"], ["Федеральные законы"]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    
+    await update.message.reply_text(
+        "Бот перезапущен. Выберите категорию законов:",
+        reply_markup=reply_markup
+    )
+
+# Обработчик запросов в свободной форме
+async def handle_free_form_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_message = update.message.text
+    logger.info(f"Получен запрос от пользователя {update.message.from_user.username}: {user_message}")
+
+    if "category" in context.user_data:
+        category = context.user_data["category"]
+        
+        # Формируем запрос для нейронки
+        prompt = f"Какая статья в {category} отвечает за '{user_message}'? Ответь только названием статьи."
+        article_title = await ask_ai(prompt)
+        
+        # Ищем статью в базе данных
+        results = search_laws(article_title, category)
+        
+        if results:
+            law = results[0]  # Берем первую найденную статью
+            summary = await get_article_summary(law["link"])
+            response = f"📖 {law['title']}\n🔗 {law['link']}\nℹ️ {summary}"
+        else:
+            response = f"По вашему запросу в категории '{category}' ничего не найдено."
+        
+        await update.message.reply_text(response)
+    else:
+        await update.message.reply_text("Пожалуйста, сначала выберите категорию законов.")
+
 # Обработчик текстовых сообщений
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = update.message.text
     logger.info(f"Получено сообщение от пользователя {update.message.from_user.username}: {user_message}")
 
     if user_message in ["Трудовой кодекс", "Административные правонарушения", "Федеральные законы"]:
-        await update.message.reply_text(f"Вы выбрали категорию: {user_message}. Введите ключевое слово для поиска.")
+        await update.message.reply_text(f"Вы выбрали категорию: {user_message}. Введите запрос, например: 'какая статья отвечает за время рабочего дня'.")
         context.user_data["category"] = user_message
     else:
         if "category" in context.user_data:
-            category = context.user_data["category"]
-            results = search_laws(user_message, category)
-            
-            if results:
-                response = f"Вот что я нашёл в категории '{category}':\n\n"
-                for law in results:
-                    summary = await get_article_summary(law["link"])
-                    response += f"📖 {law['title']}\n🔗 {law['link']}\nℹ️ {summary}\n\n"
-            else:
-                response = f"По вашему запросу в категории '{category}' ничего не найдено."
-            
-            await update.message.reply_text(response)
+            await handle_free_form_query(update, context)
         else:
             await update.message.reply_text("Пожалуйста, сначала выберите категорию законов.")
 
@@ -151,6 +183,7 @@ def main():
     application = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("restart", restart))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     application.run_polling()
