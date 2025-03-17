@@ -1,5 +1,3 @@
-# bot.py
-
 import requests
 import logging
 import json
@@ -33,7 +31,7 @@ async def ask_ai(question: str) -> str:
         "messages": [
             {
                 "role": "system",
-                "content": "You are a helpful assistant. Respond in Russian."
+                "content": "You are a helpful assistant. Respond in Russian and provide information only related to Russian laws. Always include links to relevant articles if applicable."
             },
             {
                 "role": "user",
@@ -90,6 +88,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info(f"Пользователь {update.message.from_user.username} запустил бота.")
     await update.message.reply_text("Привет! Я ваш помощник с ИИ. Задайте мне вопрос или используйте команду /laws для поиска законов.")
 
+# Обработчик команды /restart
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info(f"Пользователь {update.message.from_user.username} перезапустил бота.")
+    await update.message.reply_text("Бот перезапущен. Задайте мне вопрос или используйте команду /laws для поиска законов.")
+
 # Обработчик команды /laws
 async def laws(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_message = " ".join(context.args)  # Получаем аргументы команды
@@ -131,6 +134,7 @@ def main():
 
     # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("restart", restart))  # Добавляем обработчик команды /restart
     application.add_handler(CommandHandler("laws", laws))  # Добавляем обработчик команды /laws
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
